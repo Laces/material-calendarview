@@ -1,7 +1,6 @@
 package com.prolificinteractive.materialcalendarview;
 
 import android.annotation.SuppressLint;
-import android.content.Context;
 import android.support.annotation.NonNull;
 import android.util.AttributeSet;
 import android.view.View;
@@ -9,13 +8,17 @@ import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import com.prolificinteractive.materialcalendarview.MaterialCalendarView.ShowOtherDates;
 import com.prolificinteractive.materialcalendarview.format.DayFormatter;
 import com.prolificinteractive.materialcalendarview.format.WeekDayFormatter;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collection;
 import java.util.List;
 
+import static com.prolificinteractive.materialcalendarview.MaterialCalendarView.SHOW_DEFAULTS;
+import static com.prolificinteractive.materialcalendarview.MaterialCalendarView.showOtherMonths;
 import static java.util.Calendar.DATE;
 import static java.util.Calendar.DAY_OF_WEEK;
 
@@ -30,12 +33,7 @@ class MonthView extends ViewGroup implements View.OnClickListener {
     protected static final int DEFAULT_MAX_WEEKS = 6;
     protected static final int DEFAULT_MONTH_TILE_HEIGHT = DEFAULT_MAX_WEEKS + 1;
 
-    public interface Callbacks {
-
-        void onDateChanged(CalendarDay date);
-    }
-
-    private Callbacks callbacks;
+    private MaterialCalendarView mcv;
 
     private final ArrayList<WeekDayView> weekDayViews = new ArrayList<>();
     private final ArrayList<DayView> monthDayViews = new ArrayList<>();
@@ -45,17 +43,18 @@ class MonthView extends ViewGroup implements View.OnClickListener {
 
     private final Calendar tempWorkingCalendar = CalendarUtils.getInstance();
 
-    private CalendarDay selection = null;
     private CalendarDay minDate = null;
     private CalendarDay maxDate = null;
 
-    private boolean showOtherDates = false;
+    @ShowOtherDates
+    private int showOtherDates = SHOW_DEFAULTS;
 
     private final ArrayList<DecoratorResult> decoratorResults = new ArrayList<>();
 
 
-    public MonthView(Context context, CalendarDay month, int firstDayOfWeek) {
-        super(context);
+    public MonthView(@NonNull MaterialCalendarView view, CalendarDay month, int firstDayOfWeek) {
+        super(view.getContext());
+        this.mcv = view;
         this.month = month;
         this.firstDayOfWeek = firstDayOfWeek;
 
@@ -65,7 +64,7 @@ class MonthView extends ViewGroup implements View.OnClickListener {
         Calendar calendar = resetAndGetWorkingCalendar();
 
         for (int i = 0; i < DEFAULT_DAYS_IN_WEEK; i++) {
-            WeekDayView weekDayView = new WeekDayView(context, CalendarUtils.getDayOfWeek(calendar));
+            WeekDayView weekDayView = new WeekDayView(getContext(), CalendarUtils.getDayOfWeek(calendar));
             weekDayViews.add(weekDayView);
             addView(weekDayView);
             calendar.add(DATE, 1);
@@ -73,10 +72,10 @@ class MonthView extends ViewGroup implements View.OnClickListener {
 
         calendar = resetAndGetWorkingCalendar();
 
-        for(int r = 0; r < DEFAULT_MAX_WEEKS; r++) {
-            for(int i = 0; i < DEFAULT_DAYS_IN_WEEK; i++) {
+        for (int r = 0; r < DEFAULT_MAX_WEEKS; r++) {
+            for (int i = 0; i < DEFAULT_DAYS_IN_WEEK; i++) {
                 CalendarDay day = CalendarDay.from(calendar);
-                DayView dayView = new DayView(context, day);
+                DayView dayView = new DayView(getContext(), day);
                 dayView.setOnClickListener(this);
                 monthDayViews.add(dayView);
                 addView(dayView, new LayoutParams());
@@ -84,38 +83,39 @@ class MonthView extends ViewGroup implements View.OnClickListener {
                 calendar.add(DATE, 1);
             }
         }
-
-        setSelectedDate(CalendarDay.today());
     }
 
 
     void setDayViewDecorators(List<DecoratorResult> results) {
         this.decoratorResults.clear();
-        if(results != null) {
+        if (results != null) {
             this.decoratorResults.addAll(results);
         }
         invalidateDecorators();
     }
 
     public void setWeekDayTextAppearance(int taId) {
-        for(WeekDayView weekDayView : weekDayViews) {
+        for (WeekDayView weekDayView : weekDayViews) {
             weekDayView.setTextAppearance(getContext(), taId);
         }
     }
 
     public void setDateTextAppearance(int taId) {
-        for(DayView dayView : monthDayViews) {
+        for (DayView dayView : monthDayViews) {
             dayView.setTextAppearance(getContext(), taId);
         }
     }
 
-    public void setShowOtherDates(boolean show) {
-        this.showOtherDates = show;
+    public void setShowOtherDates(@ShowOtherDates int showFlags) {
+        this.showOtherDates = showFlags;
         updateUi();
     }
 
-    public boolean getShowOtherDates() {
-        return showOtherDates;
+    public void setSelectionEnabled(boolean selectionEnabled) {
+        for (DayView dayView : monthDayViews) {
+            dayView.setOnClickListener(selectionEnabled ? this : null);
+            dayView.setClickable(selectionEnabled);
+        }
     }
 
     public CalendarDay getMonth() {
@@ -123,7 +123,7 @@ class MonthView extends ViewGroup implements View.OnClickListener {
     }
 
     public void setSelectionColor(int color) {
-        for(DayView dayView : monthDayViews) {
+        for (DayView dayView : monthDayViews) {
             dayView.setSelectionColor(color);
         }
     }
@@ -134,8 +134,8 @@ class MonthView extends ViewGroup implements View.OnClickListener {
         int dow = CalendarUtils.getDayOfWeek(tempWorkingCalendar);
         int delta = firstDayOfWeek - dow;
         //If the delta is positive, we want to remove a week
-        boolean removeRow = showOtherDates ? delta >= 0 : delta > 0;
-        if(removeRow) {
+        boolean removeRow = showOtherMonths(showOtherDates) ? delta >= 0 : delta > 0;
+        if (removeRow) {
             delta -= DEFAULT_DAYS_IN_WEEK;
         }
         tempWorkingCalendar.add(DATE, delta);
@@ -147,13 +147,13 @@ class MonthView extends ViewGroup implements View.OnClickListener {
 
         Calendar calendar = resetAndGetWorkingCalendar();
         calendar.set(DAY_OF_WEEK, dayOfWeek);
-        for(WeekDayView dayView : weekDayViews) {
+        for (WeekDayView dayView : weekDayViews) {
             dayView.setDayOfWeek(calendar);
             calendar.add(DATE, 1);
         }
 
         calendar = resetAndGetWorkingCalendar();
-        for(DayView dayView : monthDayViews) {
+        for (DayView dayView : monthDayViews) {
             CalendarDay day = CalendarDay.from(calendar);
             dayView.setDay(day);
             calendar.add(DATE, 1);
@@ -163,13 +163,13 @@ class MonthView extends ViewGroup implements View.OnClickListener {
     }
 
     public void setWeekDayFormatter(WeekDayFormatter formatter) {
-        for(WeekDayView dayView : weekDayViews) {
+        for (WeekDayView dayView : weekDayViews) {
             dayView.setWeekDayFormatter(formatter);
         }
     }
 
     public void setDayFormatter(DayFormatter formatter) {
-        for(DayView dayView : monthDayViews) {
+        for (DayView dayView : monthDayViews) {
             dayView.setDayFormatter(formatter);
         }
     }
@@ -184,27 +184,29 @@ class MonthView extends ViewGroup implements View.OnClickListener {
         updateUi();
     }
 
-    public void setSelectedDate(CalendarDay cal) {
-        selection = cal;
-        updateUi();
+    public void setSelectedDates(Collection<CalendarDay> dates) {
+        for (DayView dayView : monthDayViews) {
+            CalendarDay day = dayView.getDate();
+            dayView.setChecked(dates != null && dates.contains(day));
+        }
+        postInvalidate();
     }
 
     private void updateUi() {
         int ourMonth = month.getMonth();
-        for(DayView dayView : monthDayViews) {
+        for (DayView dayView : monthDayViews) {
             CalendarDay day = dayView.getDate();
             dayView.setupSelection(showOtherDates, day.isInRange(minDate, maxDate), day.getMonth() == ourMonth);
-            dayView.setChecked(day.equals(selection));
         }
         postInvalidate();
     }
 
     private void invalidateDecorators() {
         final DayViewFacade facadeAccumulator = new DayViewFacade();
-        for(DayView dayView : monthDayViews) {
+        for (DayView dayView : monthDayViews) {
             facadeAccumulator.reset();
-            for(DecoratorResult result : decoratorResults) {
-                if(result.decorator.shouldDecorate(dayView.getDate())) {
+            for (DecoratorResult result : decoratorResults) {
+                if (result.decorator.shouldDecorate(dayView.getDate())) {
                     result.result.applyTo(facadeAccumulator);
                 }
             }
@@ -212,28 +214,11 @@ class MonthView extends ViewGroup implements View.OnClickListener {
         }
     }
 
-    public void setCallbacks(Callbacks callbacks) {
-        this.callbacks = callbacks;
-    }
-
     @Override
     public void onClick(View v) {
-        if(v instanceof DayView) {
-            for(DayView other : monthDayViews) {
-                other.setChecked(false);
-            }
+        if (v instanceof DayView) {
             DayView dayView = (DayView) v;
-            dayView.setChecked(true);
-
-            CalendarDay date = dayView.getDate();
-            if(date.equals(selection)) {
-                return;
-            }
-            selection = date;
-
-            if(callbacks != null) {
-                callbacks.onDateChanged(dayView.getDate());
-            }
+            mcv.onDateClicked(dayView.getDate(), !dayView.isChecked());
         }
     }
 
@@ -260,7 +245,7 @@ class MonthView extends ViewGroup implements View.OnClickListener {
         final int specHeightMode = MeasureSpec.getMode(heightMeasureSpec);
 
         //We expect to be somewhere inside a MaterialCalendarView, which should measure EXACTLY
-        if(specHeightMode == MeasureSpec.UNSPECIFIED || specWidthMode == MeasureSpec.UNSPECIFIED) {
+        if (specHeightMode == MeasureSpec.UNSPECIFIED || specWidthMode == MeasureSpec.UNSPECIFIED) {
             throw new IllegalStateException("MonthView should never be left to decide it's size");
         }
 
@@ -312,7 +297,7 @@ class MonthView extends ViewGroup implements View.OnClickListener {
             childLeft += width;
 
             //We should warp every so many children
-            if(i % DEFAULT_DAYS_IN_WEEK == (DEFAULT_DAYS_IN_WEEK - 1)) {
+            if (i % DEFAULT_DAYS_IN_WEEK == (DEFAULT_DAYS_IN_WEEK - 1)) {
                 childLeft = parentLeft;
                 childTop += height;
             }
